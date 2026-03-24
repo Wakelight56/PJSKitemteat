@@ -28,7 +28,6 @@ class SekaiDeckPlugin(Star):
             self.moe_sekai_token = self.get_config("moe_sekai_token", "")
             self.masterdata_dir = self.get_config("masterdata_dir", "./masterdata")
             self.musicmetas_path = self.get_config("musicmetas_path", "./musicmetas.json")
-            self.user_data_path = self.get_config("user_data_path", "./user_data.json")
             self.default_algorithm = self.get_config("default_algorithm", "ga")
             self.default_target = self.get_config("default_target", "score")
             self.show_top_decks = self.get_config("show_top_decks", 3)
@@ -36,6 +35,10 @@ class SekaiDeckPlugin(Star):
             # Get plugin data directory
             self.plugin_data_path = get_astrbot_data_path() / "plugin_data" / self.name
             self.plugin_data_path.mkdir(parents=True, exist_ok=True)
+            
+            # Create user data directory
+            self.user_data_dir = self.plugin_data_path / "user_data"
+            self.user_data_dir.mkdir(parents=True, exist_ok=True)
             
             # Test moe-sekai API connection
             if self.moe_sekai_token:
@@ -52,6 +55,10 @@ class SekaiDeckPlugin(Star):
                 self.sekai_deck_recommend.update_musicmetas(self.musicmetas_path, "jp")
         except Exception as e:
             self.logger.error(f"Failed to initialize deck recommendation service: {e}")
+    
+    def _get_user_data_path(self, user_id):
+        """Get user data file path based on user ID"""
+        return self.user_data_dir / f"user_{user_id}.json"
     
     def _api_request(self, endpoint):
         """Make a request to the moe-sekai API"""
@@ -84,6 +91,9 @@ class SekaiDeckPlugin(Star):
         Algorithm options: ga, dfs
         """
         try:
+            # Get user ID
+            user_id = event.get_sender_id()
+            
             # Use default values if not provided
             if target is None:
                 target = self.default_target
@@ -99,12 +109,15 @@ class SekaiDeckPlugin(Star):
                 yield event.plain_result("Invalid algorithm. Must be one of: ga, dfs")
                 return
             
+            # Get user data path
+            user_data_path = self._get_user_data_path(user_id)
+            
             # Create recommendation options
             options = DeckRecommendOptions()
             options.target = target
             options.algorithm = algorithm
             options.region = "jp"
-            options.user_data_file_path = self.user_data_path
+            options.user_data_file_path = str(user_data_path)
             options.live_type = "multi"
             options.music_id = music_id
             options.music_diff = difficulty
@@ -134,6 +147,9 @@ class SekaiDeckPlugin(Star):
         Example: /eventdeck 160 74 expert score ga
         """
         try:
+            # Get user ID
+            user_id = event.get_sender_id()
+            
             # Use default values if not provided
             if target is None:
                 target = self.default_target
@@ -149,12 +165,15 @@ class SekaiDeckPlugin(Star):
                 yield event.plain_result("Invalid algorithm. Must be one of: ga, dfs")
                 return
             
+            # Get user data path
+            user_data_path = self._get_user_data_path(user_id)
+            
             # Create recommendation options
             options = DeckRecommendOptions()
             options.target = target
             options.algorithm = algorithm
             options.region = "jp"
-            options.user_data_file_path = self.user_data_path
+            options.user_data_file_path = str(user_data_path)
             options.live_type = "multi"
             options.music_id = music_id
             options.music_diff = difficulty
@@ -185,6 +204,9 @@ class SekaiDeckPlugin(Star):
         Example: /challengedeck 74 expert 1 score ga
         """
         try:
+            # Get user ID
+            user_id = event.get_sender_id()
+            
             # Use default values if not provided
             if target is None:
                 target = self.default_target
@@ -200,12 +222,15 @@ class SekaiDeckPlugin(Star):
                 yield event.plain_result("Invalid algorithm. Must be one of: ga, dfs")
                 return
             
+            # Get user data path
+            user_data_path = self._get_user_data_path(user_id)
+            
             # Create recommendation options
             options = DeckRecommendOptions()
             options.target = target
             options.algorithm = algorithm
             options.region = "jp"
-            options.user_data_file_path = self.user_data_path
+            options.user_data_file_path = str(user_data_path)
             options.live_type = "challenge"
             options.music_id = music_id
             options.music_diff = difficulty
@@ -237,6 +262,9 @@ class SekaiDeckPlugin(Star):
         Example: /bonusdeck 160 120 dfs
         """
         try:
+            # Get user ID
+            user_id = event.get_sender_id()
+            
             # Use default value if not provided
             if algorithm is None:
                 algorithm = self.default_algorithm
@@ -246,12 +274,15 @@ class SekaiDeckPlugin(Star):
                 yield event.plain_result("Invalid algorithm. Must be one of: ga, dfs")
                 return
             
+            # Get user data path
+            user_data_path = self._get_user_data_path(user_id)
+            
             # Create recommendation options
             options = DeckRecommendOptions()
             options.target = "bonus"
             options.algorithm = algorithm
             options.region = "jp"
-            options.user_data_file_path = self.user_data_path
+            options.user_data_file_path = str(user_data_path)
             options.live_type = "solo"
             options.event_id = event_id
             options.target_bonus_list = [target_bonus]
@@ -281,6 +312,9 @@ class SekaiDeckPlugin(Star):
         Example: /noeventdeck 74 expert score ga
         """
         try:
+            # Get user ID
+            user_id = event.get_sender_id()
+            
             # Use default values if not provided
             if target is None:
                 target = self.default_target
@@ -296,12 +330,15 @@ class SekaiDeckPlugin(Star):
                 yield event.plain_result("Invalid algorithm. Must be one of: ga, dfs")
                 return
             
+            # Get user data path
+            user_data_path = self._get_user_data_path(user_id)
+            
             # Create recommendation options
             options = DeckRecommendOptions()
             options.target = target
             options.algorithm = algorithm
             options.region = "jp"
-            options.user_data_file_path = self.user_data_path
+            options.user_data_file_path = str(user_data_path)
             options.live_type = "multi"
             options.music_id = music_id
             options.music_diff = difficulty
@@ -403,7 +440,6 @@ class SekaiDeckPlugin(Star):
             response += "- moe_sekai_token: Your moe-sekai API token\n"
             response += "- masterdata_dir: Path to masterdata directory\n"
             response += "- musicmetas_path: Path to musicmetas.json\n"
-            response += "- user_data_path: Path to user data JSON\n"
             response += "- default_algorithm: Default algorithm (ga/dfs)\n"
             response += "- default_target: Default target (score/power/skill/bonus)\n"
             response += "- show_top_decks: Number of top decks to show\n"
