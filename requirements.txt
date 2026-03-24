@@ -6,6 +6,7 @@ sekai-deck-recommend-cpp>=0.1.0
 
 # Other dependencies
 numpy>=1.24.0
+requests>=2.31.0
 
 # Development dependencies
 pytest>=7.0.0

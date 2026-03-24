@@ -6,6 +6,7 @@ from sekai_deck_recommend_cpp import (
 )
 import json
 import os
+import requests
 
 class SekaiDeckPlugin(Star):
     def __init__(self):
@@ -16,6 +17,8 @@ class SekaiDeckPlugin(Star):
         self.masterdata_dir = os.environ.get("SEKAI_MASTERDATA_DIR", "./masterdata")
         self.musicmetas_path = os.environ.get("SEKAI_MUSICMETAS_PATH", "./musicmetas.json")
         self.user_data_path = os.environ.get("SEKAI_USER_DATA_PATH", "./user_data.json")
+        self.moe_sekai_token = os.environ.get("MOE_SEKAI_TOKEN", "")
+        self.api_base_url = "https://seka-api.exmeaning.com/api/jp"
         self._initialize()
     
     def _initialize(self):
@@ -25,8 +28,38 @@ class SekaiDeckPlugin(Star):
                 self.sekai_deck_recommend.update_masterdata(self.masterdata_dir, "jp")
             if os.path.exists(self.musicmetas_path):
                 self.sekai_deck_recommend.update_musicmetas(self.musicmetas_path, "jp")
+            
+            # Test moe-sekai API connection
+            if self.moe_sekai_token:
+                system_info = self.get_system_info()
+                if system_info:
+                    self.logger.info("Successfully connected to moe-sekai API")
+                else:
+                    self.logger.warning("Failed to connect to moe-sekai API")
         except Exception as e:
             self.logger.error(f"Failed to initialize deck recommendation service: {e}")
+    
+    def _api_request(self, endpoint):
+        """Make a request to the moe-sekai API"""
+        if not self.moe_sekai_token:
+            return None
+        
+        url = f"{self.api_base_url}/{endpoint}"
+        headers = {
+            "x-moe-sekai-token": self.moe_sekai_token
+        }
+        
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            self.logger.error(f"API request failed: {e}")
+            return None
+    
+    def get_system_info(self):
+        """Get system information from moe-sekai API"""
+        return self._api_request("system")
     
     def start(self):
         """Start the plugin"""
@@ -42,6 +75,8 @@ class SekaiDeckPlugin(Star):
         """Handle incoming messages"""
         if message.content.startswith("/deck"):
             await self.handle_deck_command(message)
+        elif message.content.startswith("/system"):
+            await self.handle_system_command(message)
     
     async def handle_deck_command(self, message):
         """Handle deck recommendation command"""
@@ -95,6 +130,42 @@ class SekaiDeckPlugin(Star):
         # Format the result into a readable message
         # This is a placeholder, actual formatting depends on the result structure
         return f"Deck recommendation result: {json.dumps(result, ensure_ascii=False, indent=2)}"
+    
+    async def handle_system_command(self, message):
+        """Handle system information command"""
+        try:
+            if not self.moe_sekai_token:
+                await message.reply("Error: MOE_SEKAI_TOKEN is not configured")
+                return
+            
+            system_info = self.get_system_info()
+            if not system_info:
+                await message.reply("Error: Failed to get system information")
+                return
+            
+            # Format system information
+            response = "System Information:\n"
+            response += f"Server Time: {system_info.get('serverDate', 'N/A')}\n"
+            response += f"Timezone: {system_info.get('timezone', 'N/A')}\n"
+            response += f"Profile: {system_info.get('profile', 'N/A')}\n"
+            response += f"Maintenance Status: {system_info.get('maintenanceStatus', 'N/A')}\n"
+            
+            # Add app versions
+            app_versions = system_info.get('appVersions', [])
+            if app_versions:
+                response += "\nApp Versions:\n"
+                for version in app_versions[:3]:  # Show first 3 versions
+                    app_version = version.get('appVersion', 'N/A')
+                    status = version.get('appVersionStatus', 'N/A')
+                    response += f"- Version {app_version}: {status}\n"
+                if len(app_versions) > 3:
+                    response += f"... and {len(app_versions) - 3} more versions\n"
+            
+            await message.reply(response)
+            
+        except Exception as e:
+            self.logger.error(f"Error handling system command: {e}")
+            await message.reply(f"Error: {str(e)}")
 
 # Create plugin instance
 plugin = SekaiDeckPlugin()
