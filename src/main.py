@@ -77,6 +77,8 @@ class SekaiDeckPlugin(Star):
             await self.handle_deck_command(message)
         elif message.content.startswith("/system"):
             await self.handle_system_command(message)
+        elif message.content.startswith("/help"):
+            await self.handle_help_command(message)
     
     async def handle_deck_command(self, message):
         """Handle deck recommendation command"""
@@ -165,6 +167,32 @@ class SekaiDeckPlugin(Star):
             
         except Exception as e:
             self.logger.error(f"Error handling system command: {e}")
+            await message.reply(f"Error: {str(e)}")
+    
+    async def handle_help_command(self, message):
+        """Handle help command"""
+        try:
+            response = "=== PJSK Item Teat Plugin Help ===\n\n"
+            response += "**Available Commands:**\n\n"
+            response += "1. **/deck <music_id> <difficulty> [target] [algorithm]**\n"
+            response += "   - Get deck recommendation for a song\n"
+            response += "   - Example: /deck 74 expert score ga\n"
+            response += "   - Target options: score, power, skill, bonus\n"
+            response += "   - Algorithm options: ga, dfs\n\n"
+            response += "2. **/system**\n"
+            response += "   - Get system information from moe-sekai API\n\n"
+            response += "3. **/help**\n"
+            response += "   - Show this help message\n\n"
+            response += "=== Configuration ===\n"
+            response += "- MOE_SEKAI_TOKEN: Your moe-sekai API token\n"
+            response += "- SEKAI_MASTERDATA_DIR: Path to masterdata directory\n"
+            response += "- SEKAI_MUSICMETAS_PATH: Path to musicmetas.json\n"
+            response += "- SEKAI_USER_DATA_PATH: Path to user data JSON\n"
+            
+            await message.reply(response)
+            
+        except Exception as e:
+            self.logger.error(f"Error handling help command: {e}")
             await message.reply(f"Error: {str(e)}")
 
 # Create plugin instance
