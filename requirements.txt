@@ -4,9 +4,11 @@ transformers>=4.30.0
 # Sekai deck recommendation
 sekai-deck-recommend-cpp>=0.1.0
 
+# Async HTTP client
+aiohttp>=3.9.0
+
 # Other dependencies
 numpy>=1.24.0
-requests>=2.31.0
 
 # Development dependencies
 pytest>=7.0.0

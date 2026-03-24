@@ -9,7 +9,7 @@ from sekai_deck_recommend_cpp import (
 )
 import json
 import os
-import requests
+import aiohttp
 import re
 from datetime import datetime
 
@@ -40,14 +40,6 @@ class SekaiDeckPlugin(Star):
             self.user_data_dir = self.plugin_data_path / "user_data"
             self.user_data_dir.mkdir(parents=True, exist_ok=True)
             
-            # Test moe-sekai API connection
-            if self.moe_sekai_token:
-                system_info = self.get_system_info()
-                if system_info:
-                    self.logger.info("Successfully connected to moe-sekai API")
-                else:
-                    self.logger.warning("Failed to connect to moe-sekai API")
-            
             # Update masterdata and musicmetas if files exist
             if os.path.exists(self.masterdata_dir):
                 self.sekai_deck_recommend.update_masterdata(self.masterdata_dir, "jp")
@@ -60,8 +52,34 @@ class SekaiDeckPlugin(Star):
         """Get user data file path based on user ID"""
         return self.user_data_dir / f"user_{user_id}.json"
     
-    def _api_request(self, endpoint):
-        """Make a request to the moe-sekai API"""
+    def _get_user_suite_path(self, user_id):
+        """Get user suite file path based on user ID"""
+        return self.user_data_dir / f"suite_{user_id}.json"
+    
+    def _load_user_suite(self, user_id):
+        """Load user suite data"""
+        suite_path = self._get_user_suite_path(user_id)
+        if suite_path.exists():
+            try:
+                with open(suite_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                self.logger.error(f"Failed to load user suite: {e}")
+        return {}
+    
+    def _save_user_suite(self, user_id, suite_data):
+        """Save user suite data"""
+        suite_path = self._get_user_suite_path(user_id)
+        try:
+            with open(suite_path, 'w', encoding='utf-8') as f:
+                json.dump(suite_data, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to save user suite: {e}")
+            return False
+    
+    async def _api_request(self, endpoint):
+        """Make an async request to the moe-sekai API"""
         if not self.moe_sekai_token:
             return None
         
@@ -71,16 +89,17 @@ class SekaiDeckPlugin(Star):
         }
         
         try:
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
-            return response.json()
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=10) as response:
+                    response.raise_for_status()
+                    return await response.json()
         except Exception as e:
             self.logger.error(f"API request failed: {e}")
             return None
     
-    def get_system_info(self):
+    async def get_system_info(self):
         """Get system information from moe-sekai API"""
-        return self._api_request("system")
+        return await self._api_request("system")
     
     @filter.command("deck")
     async def handle_deck_command(self, event: AstrMessageEvent, music_id: int, difficulty: str, target: str = None, algorithm: str = None):
@@ -362,6 +381,127 @@ class SekaiDeckPlugin(Star):
             self.logger.error(f"Error handling no event deck command: {e}")
             yield event.plain_result(f"Error: {str(e)}")
     
+    @filter.command("suite")
+    async def handle_suite_command(self, event: AstrMessageEvent, action: str = None, *args):
+        """Manage user suite data
+        Usage:
+        /suite list - List current suite
+        /suite add <card_id> <level> <skill_level> - Add card to suite
+        /suite remove <card_id> - Remove card from suite
+        /suite clear - Clear all suite data
+        /suite import <data> - Import suite data (JSON format)
+        /suite export - Export current suite data
+        """
+        try:
+            # Get user ID
+            user_id = event.get_sender_id()
+            
+            # Load current suite data
+            suite_data = self._load_user_suite(user_id)
+            
+            if action is None:
+                yield event.plain_result("Usage: /suite <action> [args]\nActions: list, add, remove, clear, import, export")
+                return
+            
+            if action == "list":
+                if not suite_data:
+                    yield event.plain_result("Your suite is empty.")
+                    return
+                
+                response = "Your Suite:\n\n"
+                for card_id, card_info in suite_data.items():
+                    response += f"Card ID: {card_id}\n"
+                    response += f"  Level: {card_info.get('level', 1)}\n"
+                    response += f"  Skill Level: {card_info.get('skill_level', 1)}\n\n"
+                
+                # Try to render as image for better display
+                try:
+                    image_url = await self.text_to_image(response)
+                    yield event.image_result(image_url)
+                except Exception as e:
+                    self.logger.warning(f"Failed to render image: {e}")
+                    yield event.plain_result(response)
+                
+            elif action == "add":
+                if len(args) < 3:
+                    yield event.plain_result("Usage: /suite add <card_id> <level> <skill_level>")
+                    return
+                
+                card_id = args[0]
+                level = int(args[1])
+                skill_level = int(args[2])
+                
+                suite_data[card_id] = {
+                    "level": level,
+                    "skill_level": skill_level
+                }
+                
+                if self._save_user_suite(user_id, suite_data):
+                    yield event.plain_result(f"Added card {card_id} to suite.")
+                else:
+                    yield event.plain_result("Failed to save suite data.")
+                
+            elif action == "remove":
+                if len(args) < 1:
+                    yield event.plain_result("Usage: /suite remove <card_id>")
+                    return
+                
+                card_id = args[0]
+                if card_id in suite_data:
+                    del suite_data[card_id]
+                    if self._save_user_suite(user_id, suite_data):
+                        yield event.plain_result(f"Removed card {card_id} from suite.")
+                    else:
+                        yield event.plain_result("Failed to save suite data.")
+                else:
+                    yield event.plain_result(f"Card {card_id} not found in suite.")
+                
+            elif action == "clear":
+                if self._save_user_suite(user_id, {}):
+                    yield event.plain_result("Suite cleared.")
+                else:
+                    yield event.plain_result("Failed to clear suite data.")
+                
+            elif action == "import":
+                if len(args) < 1:
+                    yield event.plain_result("Usage: /suite import <data> (JSON format)")
+                    return
+                
+                try:
+                    import_data = json.loads(' '.join(args))
+                    if isinstance(import_data, dict):
+                        if self._save_user_suite(user_id, import_data):
+                            yield event.plain_result("Suite data imported successfully.")
+                        else:
+                            yield event.plain_result("Failed to save imported suite data.")
+                    else:
+                        yield event.plain_result("Invalid suite data format. Expected JSON object.")
+                except json.JSONDecodeError:
+                    yield event.plain_result("Invalid JSON format.")
+                
+            elif action == "export":
+                if not suite_data:
+                    yield event.plain_result("Your suite is empty.")
+                    return
+                
+                export_data = json.dumps(suite_data, ensure_ascii=False, indent=2)
+                response = f"Your Suite Data:\n\n{export_data}"
+                
+                # Try to render as image for better display
+                try:
+                    image_url = await self.text_to_image(response)
+                    yield event.image_result(image_url)
+                except Exception as e:
+                    self.logger.warning(f"Failed to render image: {e}")
+                    yield event.plain_result(response)
+                
+            else:
+                yield event.plain_result("Invalid action. Available actions: list, add, remove, clear, import, export")
+            
+        except Exception as e:
+            self.logger.error(f"Error handling suite command: {e}")
+            yield event.plain_result(f"Error: {str(e)}")
+    
     @filter.command("system")
     async def handle_system_command(self, event: AstrMessageEvent):
         """Get system information from moe-sekai API
@@ -372,7 +512,7 @@ class SekaiDeckPlugin(Star):
                 yield event.plain_result("Error: MOE_SEKAI_TOKEN is not configured")
                 return
             
-            system_info = self.get_system_info()
+            system_info = await self.get_system_info()
             if not system_info:
                 yield event.plain_result("Error: Failed to get system information")
                 return
@@ -432,9 +572,13 @@ class SekaiDeckPlugin(Star):
             response += "5. **/noeventdeck <music_id> <difficulty> [target] [algorithm]**\n"
             response += "   - Get deck recommendation without event bonus\n"
             response += "   - Example: /noeventdeck 74 expert score ga\n\n"
-            response += "6. **/system**\n"
+            response += "6. **/suite <action> [args]**\n"
+            response += "   - Manage user suite data\n"
+            response += "   - Actions: list, add, remove, clear, import, export\n"
+            response += "   - Example: /suite add 123 50 10\n\n"
+            response += "7. **/system**\n"
             response += "   - Get system information from moe-sekai API\n\n"
-            response += "7. **/help**\n"
+            response += "8. **/help**\n"
             response += "   - Show this help message\n\n"
             response += "=== Configuration ===\n"
             response += "- moe_sekai_token: Your moe-sekai API token\n"
