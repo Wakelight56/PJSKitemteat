@@ -7,6 +7,7 @@ from sekai_deck_recommend_cpp import (
     DeckRecommendOptions,
     DeckRecommendCardConfig
 )
+from .team import TeamManager
 import json
 import os
 import aiohttp
@@ -20,6 +21,7 @@ class SekaiDeckPlugin(Star):
         self.name = "sekai_deck"
         self.description = "Sekai deck recommendation plugin"
         self.sekai_deck_recommend = SekaiDeckRecommend()
+        self.team_manager = TeamManager(self.name)
         self.SERVERS = ["cn", "tw", "jp"]
         self.SERVER_NAME = {"cn": "国服", "tw": "台服", "jp": "日服"}
         self._initialize()
@@ -282,6 +284,84 @@ class SekaiDeckPlugin(Star):
         except Exception as e:
             self.logger.error(f"Error handling switch server command: {e}")
             return f"Error: {str(e)}"
+    
+    # ───────────────────────── 队伍管理功能 ──────────────────────────
+    
+    @filter.command_group("pjsk")
+    async def pjsk_command_group(self, event: AstrMessageEvent):
+        """PJSK 相关命令组"""
+        pass
+    
+    @pjsk_command_group.command("team")
+    async def handle_team_command(self, event: AstrMessageEvent, action: str = None, *args):
+        """队伍管理命令
+        Usage:
+        /pjsk team create <队伍名>     # 创建队伍
+        /pjsk team add <队伍名> <卡牌 ID>  # 添加卡牌到队伍
+        /pjsk team remove <队伍名> <位置>  # 移除某个位置的卡牌
+        /pjsk team list                # 查看我的所有队伍
+        /pjsk team show <队伍名>       # 显示队伍详情（5 张卡）
+        /pjsk team power <队伍名>      # 计算队伍综合力
+        """
+        try:
+            user_id = event.get_sender_id()
+            
+            if action is None:
+                yield event.plain_result("Usage: /pjsk team <action> [args]\nActions: create, add, remove, list, show, power")
+                return
+            
+            if action == "create":
+                if len(args) < 1:
+                    yield event.plain_result("Usage: /pjsk team create <队伍名>")
+                    return
+                team_name = ' '.join(args)
+                result = self.team_manager.create_team(user_id, team_name)
+                yield event.plain_result(result)
+            
+            elif action == "add":
+                if len(args) < 2:
+                    yield event.plain_result("Usage: /pjsk team add <队伍名> <卡牌 ID>")
+                    return
+                team_name = args[0]
+                card_id = args[1]
+                result = self.team_manager.add_card(user_id, team_name, card_id)
+                yield event.plain_result(result)
+            
+            elif action == "remove":
+                if len(args) < 2:
+                    yield event.plain_result("Usage: /pjsk team remove <队伍名> <位置>")
+                    return
+                team_name = args[0]
+                position = args[1]
+                result = self.team_manager.remove_card(user_id, team_name, position)
+                yield event.plain_result(result)
+            
+            elif action == "list":
+                result = self.team_manager.list_teams(user_id)
+                yield event.plain_result(result)
+            
+            elif action == "show":
+                if len(args) < 1:
+                    yield event.plain_result("Usage: /pjsk team show <队伍名>")
+                    return
+                team_name = ' '.join(args)
+                result = self.team_manager.show_team(user_id, team_name)
+                yield event.plain_result(result)
+            
+            elif action == "power":
+                if len(args) < 1:
+                    yield event.plain_result("Usage: /pjsk team power <队伍名>")
+                    return
+                team_name = ' '.join(args)
+                result = self.team_manager.calculate_team_power(user_id, team_name)
+                yield event.plain_result(result)
+            
+            else:
+                yield event.plain_result("Invalid action. Available actions: create, add, remove, list, show, power")
+            
+        except Exception as e:
+            self.logger.error(f"Error handling team command: {e}")
+            yield event.plain_result(f"Error: {str(e)}")
     
     # ───────────────────────── 组卡功能 ──────────────────────────
     
@@ -768,9 +848,19 @@ class SekaiDeckPlugin(Star):
             response += "   - Switch default server\n"
             response += "   - Example: /pjsk服务器 jp\n"
             response += "   - Server options: cn, tw, jp\n\n"
-            response += "9. **/system**\n"
+            response += "9. **/pjsk team <action> [args]**\n"
+            response += "   - Manage teams\n"
+            response += "   - Actions: create, add, remove, list, show, power\n"
+            response += "   - Examples:\n"
+            response += "     - /pjsk team create 队伍1\n"
+            response += "     - /pjsk team add 队伍1 101\n"
+            response += "     - /pjsk team remove 队伍1 1\n"
+            response += "     - /pjsk team list\n"
+            response += "     - /pjsk team show 队伍1\n"
+            response += "     - /pjsk team power 队伍1\n\n"
+            response += "10. **/system**\n"
             response += "   - Get system information from moe-sekai API\n\n"
-            response += "10. **/help**\n"
+            response += "11. **/help**\n"
             response += "   - Show this help message\n\n"
             response += "=== Configuration ===\n"
             response += "- moe_sekai_token: Your moe-sekai API token\n"
