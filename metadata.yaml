@@ -1,0 +1,28 @@
+name: PJSKitemteat
+version: 1.0.0
+description: Project Sekai deck recommendation plugin for AstrBot
+author: Wakelight56
+display_name: PJSK Item Teat
+repository: https://github.com/Wakelight56/PJSKitemteat
+dependencies:
+  - transformers>=4.30.0
+  - sekai-deck-recommend-cpp>=0.1.0
+  - numpy>=1.24.0
+  - requests>=2.31.0
+  - pytest>=7.0.0
+support_platforms:
+  - telegram
+  - discord
+  - aiocqhttp
+  - qq_official
+  - wecom
+  - lark
+  - dingtalk
+  - slack
+  - kook
+  - vocechat
+  - weixin_official_accounts
+  - atori
+  - misskey
+  - line
+astrbot_version: ">=4.16,<5"
