@@ -1,46 +1,39 @@
 {
   "moe_sekai_token": {
-    "description": "moe-sekai API token",
+    "description": "Your moe-sekai API token",
     "type": "string",
-    "hint": "用于访问 moe-sekai API 的令牌",
     "obvious_hint": true
   },
-  "masterdata_dir": {
-    "description": "Masterdata directory path",
+  "api_base": {
+    "description": "API base URL",
     "type": "string",
-    "default": "./masterdata",
-    "hint": "Project Sekai masterdata 目录路径"
+    "default": "https://seka-api.exmeaning.com"
+  },
+  "masterdata_dir": {
+    "description": "Path to masterdata directory",
+    "type": "string",
+    "default": "./masterdata"
   },
   "musicmetas_path": {
-    "description": "Musicmetas file path",
+    "description": "Path to musicmetas.json",
     "type": "string",
-    "default": "./musicmetas.json",
-    "hint": "musicmetas.json 文件路径"
-  },
-  "user_data_path": {
-    "description": "User data file path",
-    "type": "string",
-    "default": "./user_data.json",
-    "hint": "用户数据 JSON 文件路径"
+    "default": "./musicmetas.json"
   },
   "default_algorithm": {
     "description": "Default algorithm",
     "type": "string",
-    "default": "ga",
     "options": ["ga", "dfs"],
-    "hint": "默认使用的组卡算法"
+    "default": "ga"
   },
   "default_target": {
     "description": "Default target",
     "type": "string",
-    "default": "score",
     "options": ["score", "power", "skill", "bonus"],
-    "hint": "默认使用的优化目标"
+    "default": "score"
   },
   "show_top_decks": {
     "description": "Number of top decks to show",
     "type": "int",
-    "default": 3,
-    "hint": "显示的最佳卡组数量"
+    "default": 3
   }
 }

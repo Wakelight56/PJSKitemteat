@@ -11,6 +11,7 @@ import json
 import os
 import aiohttp
 import re
+import asyncio
 from datetime import datetime
 
 class SekaiDeckPlugin(Star):
@@ -19,6 +20,8 @@ class SekaiDeckPlugin(Star):
         self.name = "sekai_deck"
         self.description = "Sekai deck recommendation plugin"
         self.sekai_deck_recommend = SekaiDeckRecommend()
+        self.SERVERS = ["cn", "tw", "jp"]
+        self.SERVER_NAME = {"cn": "国服", "tw": "台服", "jp": "日服"}
         self._initialize()
     
     def _initialize(self):
@@ -31,6 +34,7 @@ class SekaiDeckPlugin(Star):
             self.default_algorithm = self.get_config("default_algorithm", "ga")
             self.default_target = self.get_config("default_target", "score")
             self.show_top_decks = self.get_config("show_top_decks", 3)
+            self.api_base = self.get_config("api_base", "https://seka-api.exmeaning.com")
             
             # Get plugin data directory
             self.plugin_data_path = get_astrbot_data_path() / "plugin_data" / self.name
@@ -39,6 +43,9 @@ class SekaiDeckPlugin(Star):
             # Create user data directory
             self.user_data_dir = self.plugin_data_path / "user_data"
             self.user_data_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Create bind data file path
+            self.bind_data_path = self.plugin_data_path / "bind_data.json"
             
             # Update masterdata and musicmetas if files exist
             if os.path.exists(self.masterdata_dir):
@@ -78,12 +85,48 @@ class SekaiDeckPlugin(Star):
             self.logger.error(f"Failed to save user suite: {e}")
             return False
     
+    # ───────────────────────── 绑定数据读写 ──────────────────────────
+    
+    def _load_binds(self):
+        """{ "user_id": {"cn": "id或null", "tw": "id或null", "jp": "id或null", "default": "cn"} }"""
+        if not self.bind_data_path.exists():
+            return {}
+        try:
+            return json.loads(self.bind_data_path.read_text("utf-8"))
+        except Exception as e:
+            self.logger.error(f"Failed to load bind data: {e}")
+            return {}
+    
+    def _save_binds(self, data):
+        try:
+            self.bind_data_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
+        except Exception as e:
+            self.logger.error(f"Failed to save bind data: {e}")
+    
+    def _get_user_binds(self, user_id):
+        binds = self._load_binds()
+        user_id_str = str(user_id)
+        if user_id_str not in binds or not isinstance(binds[user_id_str], dict):
+            binds[user_id_str] = {"cn": None, "tw": None, "jp": None, "default": None}
+            self._save_binds(binds)
+        return binds[user_id_str]
+    
+    def _has_any_bind(self, user_binds):
+        return any(user_binds.get(s) for s in ["cn", "tw", "jp"])
+    
+    def _mask_id(self, sekai_id):
+        if not sekai_id or len(sekai_id) <= 6:
+            return sekai_id
+        return "*" * (len(sekai_id) - 6) + sekai_id[-6:]
+    
+    # ───────────────────────── API 请求 ──────────────────────────
+    
     async def _api_request(self, endpoint):
         """Make an async request to the moe-sekai API"""
         if not self.moe_sekai_token:
             return None
         
-        url = f"https://seka-api.exmeaning.com/api/jp/{endpoint}"
+        url = f"{self.api_base}/api/jp/{endpoint}"
         headers = {
             "x-moe-sekai-token": self.moe_sekai_token
         }
@@ -100,6 +143,147 @@ class SekaiDeckPlugin(Star):
     async def get_system_info(self):
         """Get system information from moe-sekai API"""
         return await self._api_request("system")
+    
+    async def fetch_profile(self, sekai_id, server):
+        """请求指定服务器个人页，返回 {"server": "cn", "name": "xxx"} 或 None"""
+        url = f"{self.api_base}/profile/{server}/{sekai_id}?token={self.moe_sekai_token}"
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=15) as response:
+                    response.raise_for_status()
+                    content = await response.text()
+                    if "加载失败" in content:
+                        return None
+                    name_match = re.search(r'<[^>]*class="[^\"]*name[^\"]*"[^>]*>([^<]+)<', content)
+                    name = name_match.group(1).strip() if name_match else "未知"
+                    return {"server": server, "name": name}
+        except Exception as e:
+            self.logger.warning(f"[bind] {server} 请求失败：{e}")
+            return None
+    
+    # ───────────────────────── 绑定功能 ──────────────────────────
+    
+    def format_bind_status(self, user_binds):
+        default = user_binds.get("default")
+        lines = []
+        for s in self.SERVERS:
+            sid = user_binds.get(s)
+            prefix = "@ " if s == default else "     "
+            lines.append(f"{prefix}【{self.SERVER_NAME[s]}】")
+            lines.append(self._mask_id(sid) if sid else "未绑定")
+        default_name = self.SERVER_NAME.get(default, "未设置") if default else "未设置"
+        lines.append(f"你的默认服务器为【{default_name}】")
+        lines.append("通过' /pjsk服务器 cn|tw|jp '可切换你的默认服务器")
+        return "\n".join(lines)
+    
+    def bind_success_msg(self, server, name):
+        return (
+            f"{self.SERVER_NAME[server]}绑定成功: {name}\n"
+            f"你的默认服务器已修改为【{self.SERVER_NAME[server]}】\n"
+            f"通过' /pjsk服务器 cn|tw|jp '可切换你的默认服务器"
+        )
+    
+    @filter.command("绑定")
+    async def handle_bind_command(self, event: AstrMessageEvent, sekai_id: str = None, server: str = None):
+        """绑定 Project Sekai 账号
+        Usage: /绑定 <sekai_id> [server]
+        Example: /绑定 123456 jp
+        Server options: cn, tw, jp
+        """
+        try:
+            user_id = event.get_sender_id()
+            binds = self._load_binds()
+            user_binds = self._get_user_binds(user_id)
+            
+            # 无id
+            if not sekai_id:
+                if server:
+                    # /绑定 无id
+                    sid = user_binds.get(server)
+                    if not sid:
+                        return f"请输入要绑定的 id，例如：/绑定 114514 {server}"
+                    return f"当前绑定的{self.SERVER_NAME[server]}为：\n{self._mask_id(sid)}"
+                else:
+                    # /绑定 无id
+                    if not self._has_any_bind(user_binds):
+                        return "请输入要绑定的 id，例如：/绑定 114514"
+                    return self.format_bind_status(user_binds)
+            
+            # 有id，指定服务器
+            if server:
+                if server not in self.SERVERS:
+                    return f"请输入有效的服务器：{', '.join(self.SERVERS)}"
+                
+                result = await self.fetch_profile(sekai_id, server)
+                if not result:
+                    return "绑定失败，请检查id是否正确"
+                
+                user_binds[server] = sekai_id
+                user_binds["default"] = server
+                binds[str(user_id)] = user_binds
+                self._save_binds(binds)
+                return self.bind_success_msg(server, result["name"])
+            
+            # 有id，自动检测三服
+            results = await asyncio.gather(
+                *[self.fetch_profile(sekai_id, s) for s in self.SERVERS],
+                return_exceptions=True
+            )
+            
+            success = [r for r in results if isinstance(r, dict)]
+            if not success:
+                return "所有可请求服务器绑定失败，请检查id是否正确！"
+            
+            msgs = []
+            for r in success:
+                s = r["server"]
+                user_binds[s] = sekai_id
+                user_binds["default"] = s
+                msgs.append(f"{self.SERVER_NAME[s]}绑定成功: {r['name']}")
+            
+            msgs.append(f"你的默认服务器已修改为【{self.SERVER_NAME[user_binds['default']]}】")
+            msgs.append("通过' /pjsk服务器 cn|tw|jp '可切换你的默认服务器")
+            binds[str(user_id)] = user_binds
+            self._save_binds(binds)
+            return "\n".join(msgs)
+            
+        except Exception as e:
+            self.logger.error(f"Error handling bind command: {e}")
+            return f"Error: {str(e)}"
+    
+    @filter.command("pjsk服务器")
+    async def handle_switch_server_command(self, event: AstrMessageEvent, server: str = None):
+        """切换默认服务器
+        Usage: /pjsk服务器 [server]
+        Example: /pjsk服务器 jp
+        Server options: cn, tw, jp
+        """
+        try:
+            user_id = event.get_sender_id()
+            binds = self._load_binds()
+            user_binds = self._get_user_binds(user_id)
+            
+            if not server:
+                if not self._has_any_bind(user_binds):
+                    return "你还没绑定任何账号！"
+                return self.format_bind_status(user_binds)
+            
+            if server not in self.SERVERS:
+                return f"请输入有效的服务器：{', '.join(self.SERVERS)}"
+            if not user_binds.get(server):
+                return f"你还没有绑定{self.SERVER_NAME[server]}的账号"
+            
+            user_binds["default"] = server
+            binds[str(user_id)] = user_binds
+            self._save_binds(binds)
+            return f"已将默认服务器切换为【{self.SERVER_NAME[server]}】"
+            
+        except Exception as e:
+            self.logger.error(f"Error handling switch server command: {e}")
+            return f"Error: {str(e)}"
+    
+    # ───────────────────────── 组卡功能 ──────────────────────────
     
     @filter.command("deck")
     async def handle_deck_command(self, event: AstrMessageEvent, music_id: int, difficulty: str, target: str = None, algorithm: str = None):
@@ -576,12 +760,21 @@ class SekaiDeckPlugin(Star):
             response += "   - Manage user suite data\n"
             response += "   - Actions: list, add, remove, clear, import, export\n"
             response += "   - Example: /suite add 123 50 10\n\n"
-            response += "7. **/system**\n"
+            response += "7. **/绑定 <sekai_id> [server]**\n"
+            response += "   - Bind Project Sekai account\n"
+            response += "   - Example: /绑定 123456 jp\n"
+            response += "   - Server options: cn, tw, jp\n\n"
+            response += "8. **/pjsk服务器 [server]**\n"
+            response += "   - Switch default server\n"
+            response += "   - Example: /pjsk服务器 jp\n"
+            response += "   - Server options: cn, tw, jp\n\n"
+            response += "9. **/system**\n"
             response += "   - Get system information from moe-sekai API\n\n"
-            response += "8. **/help**\n"
+            response += "10. **/help**\n"
             response += "   - Show this help message\n\n"
             response += "=== Configuration ===\n"
             response += "- moe_sekai_token: Your moe-sekai API token\n"
+            response += "- api_base: API base URL (default: https://seka-api.exmeaning.com)\n"
             response += "- masterdata_dir: Path to masterdata directory\n"
             response += "- musicmetas_path: Path to musicmetas.json\n"
             response += "- default_algorithm: Default algorithm (ga/dfs)\n"
