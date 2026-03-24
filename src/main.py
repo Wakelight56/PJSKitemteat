@@ -1,6 +1,7 @@
 from astrbot import Star
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.message_components import Plain, Image, At
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from sekai_deck_recommend_cpp import (
     SekaiDeckRecommend, 
     DeckRecommendOptions,
@@ -18,20 +19,23 @@ class SekaiDeckPlugin(Star):
         self.name = "sekai_deck"
         self.description = "Sekai deck recommendation plugin"
         self.sekai_deck_recommend = SekaiDeckRecommend()
-        self.masterdata_dir = os.environ.get("SEKAI_MASTERDATA_DIR", "./masterdata")
-        self.musicmetas_path = os.environ.get("SEKAI_MUSICMETAS_PATH", "./musicmetas.json")
-        self.user_data_path = os.environ.get("SEKAI_USER_DATA_PATH", "./user_data.json")
-        self.moe_sekai_token = os.environ.get("MOE_SEKAI_TOKEN", "")
-        self.api_base_url = "https://seka-api.exmeaning.com/api/jp"
         self._initialize()
     
     def _initialize(self):
         """Initialize the deck recommendation service"""
         try:
-            if os.path.exists(self.masterdata_dir):
-                self.sekai_deck_recommend.update_masterdata(self.masterdata_dir, "jp")
-            if os.path.exists(self.musicmetas_path):
-                self.sekai_deck_recommend.update_musicmetas(self.musicmetas_path, "jp")
+            # Get configuration from AstrBot config system
+            self.moe_sekai_token = self.get_config("moe_sekai_token", "")
+            self.masterdata_dir = self.get_config("masterdata_dir", "./masterdata")
+            self.musicmetas_path = self.get_config("musicmetas_path", "./musicmetas.json")
+            self.user_data_path = self.get_config("user_data_path", "./user_data.json")
+            self.default_algorithm = self.get_config("default_algorithm", "ga")
+            self.default_target = self.get_config("default_target", "score")
+            self.show_top_decks = self.get_config("show_top_decks", 3)
+            
+            # Get plugin data directory
+            self.plugin_data_path = get_astrbot_data_path() / "plugin_data" / self.name
+            self.plugin_data_path.mkdir(parents=True, exist_ok=True)
             
             # Test moe-sekai API connection
             if self.moe_sekai_token:
@@ -40,6 +44,12 @@ class SekaiDeckPlugin(Star):
                     self.logger.info("Successfully connected to moe-sekai API")
                 else:
                     self.logger.warning("Failed to connect to moe-sekai API")
+            
+            # Update masterdata and musicmetas if files exist
+            if os.path.exists(self.masterdata_dir):
+                self.sekai_deck_recommend.update_masterdata(self.masterdata_dir, "jp")
+            if os.path.exists(self.musicmetas_path):
+                self.sekai_deck_recommend.update_musicmetas(self.musicmetas_path, "jp")
         except Exception as e:
             self.logger.error(f"Failed to initialize deck recommendation service: {e}")
     
@@ -48,7 +58,7 @@ class SekaiDeckPlugin(Star):
         if not self.moe_sekai_token:
             return None
         
-        url = f"{self.api_base_url}/{endpoint}"
+        url = f"https://seka-api.exmeaning.com/api/jp/{endpoint}"
         headers = {
             "x-moe-sekai-token": self.moe_sekai_token
         }
@@ -66,7 +76,7 @@ class SekaiDeckPlugin(Star):
         return self._api_request("system")
     
     @filter.command("deck")
-    async def handle_deck_command(self, event: AstrMessageEvent, music_id: int, difficulty: str, target: str = "score", algorithm: str = "ga"):
+    async def handle_deck_command(self, event: AstrMessageEvent, music_id: int, difficulty: str, target: str = None, algorithm: str = None):
         """Get general deck recommendation
         Usage: /deck <music_id> <difficulty> [target] [algorithm]
         Example: /deck 74 expert score ga
@@ -74,6 +84,12 @@ class SekaiDeckPlugin(Star):
         Algorithm options: ga, dfs
         """
         try:
+            # Use default values if not provided
+            if target is None:
+                target = self.default_target
+            if algorithm is None:
+                algorithm = self.default_algorithm
+            
             # Validate parameters
             if target not in ["score", "power", "skill", "bonus"]:
                 yield event.plain_result("Invalid target. Must be one of: score, power, skill, bonus")
@@ -98,19 +114,32 @@ class SekaiDeckPlugin(Star):
             
             # Format and send response
             response = self._format_deck_result(result)
-            yield event.plain_result(response)
+            
+            # Try to render as image for better display
+            try:
+                image_url = await self.text_to_image(response)
+                yield event.image_result(image_url)
+            except Exception as e:
+                self.logger.warning(f"Failed to render image: {e}")
+                yield event.plain_result(response)
             
         except Exception as e:
             self.logger.error(f"Error handling deck command: {e}")
             yield event.plain_result(f"Error: {str(e)}")
     
     @filter.command("eventdeck")
-    async def handle_event_deck_command(self, event: AstrMessageEvent, event_id: int, music_id: int, difficulty: str, target: str = "score", algorithm: str = "ga"):
+    async def handle_event_deck_command(self, event: AstrMessageEvent, event_id: int, music_id: int, difficulty: str, target: str = None, algorithm: str = None):
         """Get event deck recommendation
         Usage: /eventdeck <event_id> <music_id> <difficulty> [target] [algorithm]
         Example: /eventdeck 160 74 expert score ga
         """
         try:
+            # Use default values if not provided
+            if target is None:
+                target = self.default_target
+            if algorithm is None:
+                algorithm = self.default_algorithm
+            
             # Validate parameters
             if target not in ["score", "power", "skill", "bonus"]:
                 yield event.plain_result("Invalid target. Must be one of: score, power, skill, bonus")
@@ -136,19 +165,32 @@ class SekaiDeckPlugin(Star):
             
             # Format and send response
             response = self._format_deck_result(result)
-            yield event.plain_result(response)
+            
+            # Try to render as image for better display
+            try:
+                image_url = await self.text_to_image(response)
+                yield event.image_result(image_url)
+            except Exception as e:
+                self.logger.warning(f"Failed to render image: {e}")
+                yield event.plain_result(response)
             
         except Exception as e:
             self.logger.error(f"Error handling event deck command: {e}")
             yield event.plain_result(f"Error: {str(e)}")
     
     @filter.command("challengedeck")
-    async def handle_challenge_deck_command(self, event: AstrMessageEvent, music_id: int, difficulty: str, character_id: int = None, target: str = "score", algorithm: str = "ga"):
+    async def handle_challenge_deck_command(self, event: AstrMessageEvent, music_id: int, difficulty: str, character_id: int = None, target: str = None, algorithm: str = None):
         """Get challenge deck recommendation
         Usage: /challengedeck <music_id> <difficulty> [character_id] [target] [algorithm]
         Example: /challengedeck 74 expert 1 score ga
         """
         try:
+            # Use default values if not provided
+            if target is None:
+                target = self.default_target
+            if algorithm is None:
+                algorithm = self.default_algorithm
+            
             # Validate parameters
             if target not in ["score", "power", "skill", "bonus"]:
                 yield event.plain_result("Invalid target. Must be one of: score, power, skill, bonus")
@@ -175,19 +217,30 @@ class SekaiDeckPlugin(Star):
             
             # Format and send response
             response = self._format_deck_result(result)
-            yield event.plain_result(response)
+            
+            # Try to render as image for better display
+            try:
+                image_url = await self.text_to_image(response)
+                yield event.image_result(image_url)
+            except Exception as e:
+                self.logger.warning(f"Failed to render image: {e}")
+                yield event.plain_result(response)
             
         except Exception as e:
             self.logger.error(f"Error handling challenge deck command: {e}")
             yield event.plain_result(f"Error: {str(e)}")
     
     @filter.command("bonusdeck")
-    async def handle_bonus_deck_command(self, event: AstrMessageEvent, event_id: int, target_bonus: int, algorithm: str = "dfs"):
+    async def handle_bonus_deck_command(self, event: AstrMessageEvent, event_id: int, target_bonus: int, algorithm: str = None):
         """Get bonus deck recommendation
         Usage: /bonusdeck <event_id> <target_bonus> [algorithm]
         Example: /bonusdeck 160 120 dfs
         """
         try:
+            # Use default value if not provided
+            if algorithm is None:
+                algorithm = self.default_algorithm
+            
             # Validate parameters
             if algorithm not in ["ga", "dfs"]:
                 yield event.plain_result("Invalid algorithm. Must be one of: ga, dfs")
@@ -208,19 +261,32 @@ class SekaiDeckPlugin(Star):
             
             # Format and send response
             response = self._format_deck_result(result)
-            yield event.plain_result(response)
+            
+            # Try to render as image for better display
+            try:
+                image_url = await self.text_to_image(response)
+                yield event.image_result(image_url)
+            except Exception as e:
+                self.logger.warning(f"Failed to render image: {e}")
+                yield event.plain_result(response)
             
         except Exception as e:
             self.logger.error(f"Error handling bonus deck command: {e}")
             yield event.plain_result(f"Error: {str(e)}")
     
     @filter.command("noeventdeck")
-    async def handle_no_event_deck_command(self, event: AstrMessageEvent, music_id: int, difficulty: str, target: str = "score", algorithm: str = "ga"):
+    async def handle_no_event_deck_command(self, event: AstrMessageEvent, music_id: int, difficulty: str, target: str = None, algorithm: str = None):
         """Get deck recommendation without event bonus
         Usage: /noeventdeck <music_id> <difficulty> [target] [algorithm]
         Example: /noeventdeck 74 expert score ga
         """
         try:
+            # Use default values if not provided
+            if target is None:
+                target = self.default_target
+            if algorithm is None:
+                algorithm = self.default_algorithm
+            
             # Validate parameters
             if target not in ["score", "power", "skill", "bonus"]:
                 yield event.plain_result("Invalid target. Must be one of: score, power, skill, bonus")
@@ -246,7 +312,14 @@ class SekaiDeckPlugin(Star):
             
             # Format and send response
             response = self._format_deck_result(result)
-            yield event.plain_result(response)
+            
+            # Try to render as image for better display
+            try:
+                image_url = await self.text_to_image(response)
+                yield event.image_result(image_url)
+            except Exception as e:
+                self.logger.warning(f"Failed to render image: {e}")
+                yield event.plain_result(response)
             
         except Exception as e:
             self.logger.error(f"Error handling no event deck command: {e}")
@@ -285,7 +358,13 @@ class SekaiDeckPlugin(Star):
                 if len(app_versions) > 3:
                     response += f"... and {len(app_versions) - 3} more versions\n"
             
-            yield event.plain_result(response)
+            # Try to render as image for better display
+            try:
+                image_url = await self.text_to_image(response)
+                yield event.image_result(image_url)
+            except Exception as e:
+                self.logger.warning(f"Failed to render image: {e}")
+                yield event.plain_result(response)
             
         except Exception as e:
             self.logger.error(f"Error handling system command: {e}")
@@ -321,12 +400,21 @@ class SekaiDeckPlugin(Star):
             response += "7. **/help**\n"
             response += "   - Show this help message\n\n"
             response += "=== Configuration ===\n"
-            response += "- MOE_SEKAI_TOKEN: Your moe-sekai API token\n"
-            response += "- SEKAI_MASTERDATA_DIR: Path to masterdata directory\n"
-            response += "- SEKAI_MUSICMETAS_PATH: Path to musicmetas.json\n"
-            response += "- SEKAI_USER_DATA_PATH: Path to user data JSON\n"
+            response += "- moe_sekai_token: Your moe-sekai API token\n"
+            response += "- masterdata_dir: Path to masterdata directory\n"
+            response += "- musicmetas_path: Path to musicmetas.json\n"
+            response += "- user_data_path: Path to user data JSON\n"
+            response += "- default_algorithm: Default algorithm (ga/dfs)\n"
+            response += "- default_target: Default target (score/power/skill/bonus)\n"
+            response += "- show_top_decks: Number of top decks to show\n"
             
-            yield event.plain_result(response)
+            # Try to render as image for better display
+            try:
+                image_url = await self.text_to_image(response)
+                yield event.image_result(image_url)
+            except Exception as e:
+                self.logger.warning(f"Failed to render image: {e}")
+                yield event.plain_result(response)
             
         except Exception as e:
             self.logger.error(f"Error handling help command: {e}")
@@ -341,7 +429,7 @@ class SekaiDeckPlugin(Star):
         response = "Deck Recommendation Result:\n\n"
         
         if hasattr(result, 'decks') and result.decks:
-            for i, deck in enumerate(result.decks[:3]):  # Show top 3 decks
+            for i, deck in enumerate(result.decks[:self.show_top_decks]):  # Show configured number of decks
                 response += f"Deck {i+1}:\n"
                 response += f"Score: {deck.score}\n"
                 response += f"Total Power: {deck.total_power}\n"
